@@ -3,6 +3,7 @@ import mempoolJS from "@mempool/mempool.js";
 import { AddressTxsUtxo } from "@mempool/mempool.js/lib/interfaces/bitcoin/addresses";
 import * as bitcoin from "bitcoinjs-lib";
 import * as ecc from "@bitcoinerlab/secp256k1";
+import { MempoolReturn } from "@mempool/mempool.js/lib/interfaces/index";
 
 type BitcoinAddress = {
   address: string;
@@ -28,7 +29,7 @@ function App() {
     "tb1pmgqzlvj3kcnsaxvnvnjrfm2kyx2k9ddfp84ty6hx0972gz85gg3slq3j59"
   );
   const [toAmount, setToAmount] = React.useState<string>("100");
-  const [toFee, setToFee] = React.useState<string>("1000");
+  const [toFeeRate, setToFeeRate] = React.useState<string>("1000");
   const [address, setAddress] = React.useState<BitcoinAddress | undefined>();
   const [utxos, setUtxos] = React.useState<AddressTxsUtxo[] | undefined>();
   const [isLoading, setLoading] = React.useState(true);
@@ -64,7 +65,7 @@ function App() {
     }
     setNetwork(network);
     const {
-      bitcoin: { addresses },
+      bitcoin: { addresses, fees },
     } = mempoolJS({
       hostname: "mempool.space",
       network,
@@ -75,6 +76,8 @@ function App() {
     });
     console.log(addressTxsUtxos);
     setUtxos(addressTxsUtxos);
+    const recommendedFees = await fees.getFeesRecommended();
+    setToFeeRate(recommendedFees.fastestFee.toString());
     setLoading(false);
   }, []);
 
@@ -113,7 +116,7 @@ function App() {
     console.log(
       toAddress,
       toAmount,
-      toFee,
+      toFeeRate,
       address.publicKey,
       address.publicKey.length
     );
@@ -130,48 +133,65 @@ function App() {
       throw new Error("No output from p2tr");
     }
 
-    const amount = parseInt(toAmount);
-    const fee = parseInt(toFee); // TODO: fee should be calculated
-    const total = amount + fee;
+    let psbt: bitcoin.Psbt | undefined;
+    let estimatedVbytes = 0;
 
-    const usedUtxos: AddressTxsUtxo[] = [];
-    let usedUtxoBalance = 0;
+    for (const withFee of [false, true]) {
+      const amount = parseInt(toAmount);
+      const feeRate = parseInt(toFeeRate); // TODO: fee should be calculated
+      const total = amount + estimatedVbytes * feeRate;
 
-    for (let i = 0; i < utxos.length; i++) {
-      usedUtxos.push(utxos[i]);
-      usedUtxoBalance += utxos[i].value;
-      if (usedUtxoBalance >= total) {
-        break;
+      const usedUtxos: AddressTxsUtxo[] = [];
+      let usedUtxoBalance = 0;
+
+      for (let i = 0; i < utxos.length; i++) {
+        usedUtxos.push(utxos[i]);
+        usedUtxoBalance += utxos[i].value;
+        if (usedUtxoBalance >= total) {
+          break;
+        }
+      }
+
+      if (usedUtxoBalance < total) {
+        throw new Error("not enough balance");
+      }
+
+      psbt = new bitcoin.Psbt({ network: bitcoin.networks[network] });
+      for (const utxo of usedUtxos) {
+        psbt.addInput({
+          hash: utxo.txid,
+          index: utxo.vout,
+          witnessUtxo: { value: utxo.value, script: output },
+          tapInternalKey: xOnlyPubkey,
+        });
+      }
+
+      psbt.addOutput({
+        value: amount,
+        address: toAddress,
+      });
+      if (!withFee) {
+        // force add remainder output
+        psbt.addOutput({
+          value: 0,
+          address: address.address,
+        });
+
+        estimatedVbytes = psbt.toBuffer().byteLength;
+      } else {
+        const remainder = usedUtxoBalance - total;
+
+        if (remainder > 0) {
+          // send remainder back to original address
+          psbt.addOutput({
+            value: remainder,
+            address: address.address,
+          });
+        }
       }
     }
-
-    if (usedUtxoBalance < total) {
-      throw new Error("not enough balance");
-    }
-
-    const psbt = new bitcoin.Psbt({ network: bitcoin.networks[network] });
-    for (const utxo of usedUtxos) {
-      psbt.addInput({
-        hash: utxo.txid,
-        index: utxo.vout,
-        witnessUtxo: { value: utxo.value, script: output },
-        tapInternalKey: xOnlyPubkey,
-      });
-    }
-
-    psbt.addOutput({
-      value: amount,
-      address: toAddress,
-    });
-
-    const remainder = usedUtxoBalance - total;
-
-    if (remainder > 0) {
-      // send remainder back to original address
-      psbt.addOutput({
-        value: remainder,
-        address: address.address,
-      });
+    if (!psbt) {
+      throw new Error("No psbt");
     }
 
     const psbtHex = psbt.toHex();
@@ -254,11 +274,11 @@ function App() {
                       placeholder="amount in sats"
                       defaultValue={toAmount}
                     />
-                    Total fee{" "}
+                    Fee rate (sat/vB){" "}
                     <input
-                      onChange={(e) => setToFee(e.target.value)}
+                      onChange={(e) => setToFeeRate(e.target.value)}
                       placeholder="amount in sats"
-                      defaultValue={toAmount}
+                      defaultValue={toFeeRate}
                     />
                     <button>Submit</button>
                   </form>
