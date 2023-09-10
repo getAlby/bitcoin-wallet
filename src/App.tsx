@@ -4,6 +4,9 @@ import { AddressTxsUtxo } from "@mempool/mempool.js/lib/interfaces/bitcoin/addre
 import * as bitcoin from "bitcoinjs-lib";
 import * as ecc from "@bitcoinerlab/secp256k1";
 import { Tx } from "@mempool/mempool.js/lib/interfaces/bitcoin/transactions";
+import { AlbyLogo } from "./components/icons/AlbyLogo";
+import toast, { Toaster } from "react-hot-toast";
+import { formatDistance } from "date-fns";
 
 type BitcoinAddress = {
   address: string;
@@ -24,18 +27,21 @@ declare global {
   }
 }
 
+const tabs = ["transactions", "receive", "send"] as const;
+type TabType = (typeof tabs)[number];
+
 function App() {
   const [toAddress, setToAddress] = React.useState<string>(
     "tb1pmgqzlvj3kcnsaxvnvnjrfm2kyx2k9ddfp84ty6hx0972gz85gg3slq3j59"
   );
+  const [activeTab, setActiveTab] = React.useState<TabType>("transactions");
   const [toAmount, setToAmount] = React.useState<string>("100");
   const [toFeeRate, setToFeeRate] = React.useState<string>("1000");
   const [address, setAddress] = React.useState<BitcoinAddress | undefined>();
   const [utxos, setUtxos] = React.useState<AddressTxsUtxo[] | undefined>();
-  const [sentTransactions, setSentTransactions] = React.useState<
-    Tx[] | undefined
-  >();
+  const [transactions, setTransactions] = React.useState<Tx[] | undefined>();
   const [isLoading, setLoading] = React.useState(true);
+  const [viewingUtxos, setViewingUtxos] = React.useState(false);
   const [network, setNetwork] = React.useState<
     "bitcoin" | "testnet" | undefined
   >(undefined);
@@ -85,7 +91,7 @@ function App() {
     const sentTransactions = await addresses.getAddressTxs({
       address: address.address,
     });
-    setSentTransactions(sentTransactions);
+    setTransactions(sentTransactions);
 
     setLoading(false);
   }, []);
@@ -236,113 +242,234 @@ function App() {
     }
   }
 
-  if (error) {
-    return error;
-  }
-
   return (
-    <>
-      <div className="flex flex-col gap-4">
-        <h1>Alby Bitcoin Wallet</h1>
-        <p>
-          {!window.webbtc
-            ? "No webbtc extension detected. Try Alby"
-            : isLoading || !address
-            ? "Connecting..."
-            : address.address}
-        </p>
-        {network && <p>Network: {network}</p>}
-      </div>
-      {!isLoading && (
-        <>
-          <p>Balance</p>
-          <p>{utxos ? `${balance} sats` : "Loading..."}</p>
-          {utxos && (
-            <>
-              {utxos && (
-                <div>
-                  <p>UTXOs</p>
-                  {utxos.map((utxo) => (
-                    <p key={utxo.txid}>
-                      {utxo.txid} {utxo.value}
-                    </p>
-                  ))}
-                </div>
-              )}
-              {balance ? (
-                <div>
-                  <p>Send sats</p>
-                  <form onSubmit={sendSats}>
-                    Address{" "}
-                    <input
-                      onChange={(e) => setToAddress(e.target.value)}
-                      placeholder="tb1..."
-                      defaultValue={toAddress}
-                    />
-                    Amount{" "}
-                    <input
-                      onChange={(e) => setToAmount(e.target.value)}
-                      placeholder="amount in sats"
-                      defaultValue={toAmount}
-                    />
-                    Fee rate (sat/vB){" "}
-                    <input
-                      onChange={(e) => setToFeeRate(e.target.value)}
-                      placeholder="amount in sats"
-                      defaultValue={toFeeRate}
-                    />
-                    <button>Submit</button>
-                  </form>
-                </div>
-              ) : (
-                <p>
-                  You don't have any UTXOs. Send some sats to your address using
-                  a testnet faucet.
-                </p>
-              )}
-            </>
-          )}
-
-          {sentTransactionId && (
-            <p>
-              Sent transaction!{" "}
-              <a
-                className="text-blue-500 underline"
-                href={`https://mempool.space/testnet/tx/${sentTransactionId}`}
-                target="_blank"
-              >
-                {sentTransactionId}
-              </a>
-            </p>
-          )}
-
-          {sentTransactions && (
-            <div>
-              <p>Transactions</p>
-              {sentTransactions.map((tx) => (
-                <p key={tx.txid}>
+    <div className="w-full flex justify-center items-start">
+      <Toaster />
+      <div className="p-8 max-w-xl flex flex-col gap-4 justify-center items-center w-full break-all">
+        <AlbyLogo className="w-32 h-32" />
+        <h1 className="-mt-12">Onchain Bitcoin Wallet</h1>
+        {!isLoading && (
+          <div className="w-full">
+            <div className="stats shadow">
+              <div className="stat">
+                <div className="stat-title">Balance</div>
+                <div className="stat-value">{balance} sats</div>
+                <div className="stat-desc">
                   <a
-                    className="text-blue-500 underline"
-                    href={`https://mempool.space/testnet/tx/${tx.txid}`}
-                    target="_blank"
+                    className="link"
+                    onClick={() => setViewingUtxos(!viewingUtxos)}
                   >
-                    {tx.txid}
+                    {utxos?.length || 0} UTXOs
                   </a>
-                  {tx.vout
-                    .filter(
-                      (vout) => vout.scriptpubkey_address !== address?.address
-                    )
-                    .map((vout) => vout.value)
-                    .reduce((a, b) => a + b, 0)}{" "}
-                  sats {new Date(tx.status.block_time * 1000).toDateString()}{" "}
-                  {tx.status.confirmed ? "CONFIRMED" : "UNCONFIRMED"}
-                </p>
-              ))}
+                </div>
+              </div>
             </div>
-          )}
-        </>
-      )}
-    </>
+            {viewingUtxos && (
+              <div className="flex flex-col flex-1 w-full mt-4 gap-4">
+                {utxos
+                  ?.sort((a, b) => b.value - a.value)
+                  .map((utxo) => (
+                    <div
+                      key={utxo.txid}
+                      className="flex justify-between items-start w-full gap-4"
+                    >
+                      <a
+                        href={`https://mempool.space/${
+                          network === "testnet" ? "testnet/" : ""
+                        }tx/${utxo.txid}`}
+                        className="link"
+                      >
+                        {utxo.txid}
+                      </a>
+                      <p className="text-green-500 font-semibold flex-shrink-0">
+                        {utxo.value} sats
+                      </p>
+                    </div>
+                  ))}
+              </div>
+            )}
+          </div>
+        )}
+
+        <div className="tabs tabs-boxed my-4 w-full justify-center">
+          {tabs.map((tab) => (
+            <a
+              className={`tab tab-lg w-36 capitalize ${
+                tab === activeTab ? "tab-active" : ""
+              }`}
+              onClick={() => setActiveTab(tab)}
+            >
+              {tab}
+            </a>
+          ))}
+        </div>
+        {isLoading && (
+          <span className="loading loading-spinner loading-lg"></span>
+        )}
+        {error && <p className="text-error">{error}</p>}
+
+        {/* {network && <p>Network: {network}</p>} */}
+        {!isLoading && (
+          <>
+            {activeTab === "receive" && address && (
+              <>
+                <p>Your receive address is:</p>
+                <div className="flex gap-2">
+                  <p className="font-bold">{address.address}</p>
+                  <button
+                    className="btn btn-primary"
+                    onClick={() => {
+                      window.navigator.clipboard.writeText(address.address);
+                      toast.success("Address copied to clipboard");
+                    }}
+                  >
+                    Copy
+                  </button>
+                </div>
+              </>
+            )}
+            {activeTab === "send" && (
+              <>
+                {utxos && (
+                  <>
+                    {balance ? (
+                      <>
+                        <form
+                          onSubmit={sendSats}
+                          className="form-control w-full"
+                        >
+                          <label className="label">
+                            <span className="label-text">Address</span>
+                          </label>
+                          <input
+                            className="input input-bordered"
+                            onChange={(e) => setToAddress(e.target.value)}
+                            placeholder={
+                              network === "testnet" ? "tb1..." : "bc1..."
+                            }
+                            defaultValue={toAddress}
+                          />
+                          <label className="label">
+                            <span className="label-text">Amount</span>
+                          </label>
+                          <input
+                            className="input input-bordered"
+                            onChange={(e) => setToAmount(e.target.value)}
+                            placeholder="amount in sats"
+                            defaultValue={toAmount}
+                          />
+                          <label className="label">
+                            <span className="label-text">
+                              Fee rate (sat/vB)
+                            </span>
+                          </label>
+                          <input
+                            className="input input-bordered"
+                            onChange={(e) => setToFeeRate(e.target.value)}
+                            placeholder="amount in sats"
+                            defaultValue={toFeeRate}
+                          />
+                          <button className="btn mt-8">SEND</button>
+                        </form>
+                      </>
+                    ) : (
+                      <p>
+                        You don't have any UTXOs. Send some sats to your address
+                        using a testnet faucet.
+                      </p>
+                    )}
+                  </>
+                )}
+
+                {sentTransactionId && (
+                  <p>
+                    Sent transaction!{" "}
+                    <a
+                      className="link font-bold link-secondary underline"
+                      href={`https://mempool.space/${
+                        network === "testnet" ? "testnet/" : ""
+                      }tx/${sentTransactionId}`}
+                      target="_blank"
+                    >
+                      {sentTransactionId}
+                    </a>
+                  </p>
+                )}
+              </>
+            )}
+
+            {activeTab === "transactions" && (
+              <>
+                <table className="table">
+                  <tbody>
+                    {transactions?.map((tx) => {
+                      const isOutgoing =
+                        tx.vin[0].prevout.scriptpubkey_address ===
+                        address?.address;
+                      return (
+                        <tr key={tx.txid}>
+                          <td className="text-xs">
+                            {tx.status.confirmed
+                              ? formatDistance(
+                                  new Date(tx.status.block_time * 1000),
+                                  new Date(),
+                                  {
+                                    addSuffix: true,
+                                  }
+                                )
+                              : "unconfirmed"}{" "}
+                          </td>
+                          <td>
+                            <a
+                              className="link"
+                              href={`https://mempool.space/${
+                                network === "testnet" ? "testnet/" : ""
+                              }tx/${tx.txid}`}
+                              target="_blank"
+                            >
+                              {tx.txid.substring(0, 8)}...
+                              {tx.txid.substring(tx.txid.length - 8)}
+                            </a>
+                          </td>
+                          <td className="font-bold flex justify-center items-center gap-1">
+                            <p
+                              className={`${
+                                isOutgoing ? "text-red-500" : "text-green-500"
+                              }`}
+                            >
+                              {isOutgoing ? "-" : "+"}
+                            </p>
+                            <p>
+                              {tx.vout
+                                .filter((vout) =>
+                                  isOutgoing
+                                    ? vout.scriptpubkey_address !==
+                                      address?.address
+                                    : vout.scriptpubkey_address ===
+                                      address?.address
+                                )
+                                .map((vout) => vout.value)
+                                .reduce(
+                                  (a, b) => a + b,
+                                  isOutgoing ? tx.fee : 0
+                                )}{" "}
+                              sats
+                            </p>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+                {!transactions?.length && (
+                  <p>You don't have any transactions yet</p>
+                )}
+              </>
+            )}
+          </>
+        )}
+      </div>
+    </div>
   );
 }
 
