@@ -3,7 +3,7 @@ import mempoolJS from "@mempool/mempool.js";
 import { AddressTxsUtxo } from "@mempool/mempool.js/lib/interfaces/bitcoin/addresses";
 import * as bitcoin from "bitcoinjs-lib";
 import * as ecc from "@bitcoinerlab/secp256k1";
-import { MempoolReturn } from "@mempool/mempool.js/lib/interfaces/index";
+import { Tx } from "@mempool/mempool.js/lib/interfaces/bitcoin/transactions";
 
 type BitcoinAddress = {
   address: string;
@@ -32,6 +32,9 @@ function App() {
   const [toFeeRate, setToFeeRate] = React.useState<string>("1000");
   const [address, setAddress] = React.useState<BitcoinAddress | undefined>();
   const [utxos, setUtxos] = React.useState<AddressTxsUtxo[] | undefined>();
+  const [sentTransactions, setSentTransactions] = React.useState<
+    Tx[] | undefined
+  >();
   const [isLoading, setLoading] = React.useState(true);
   const [network, setNetwork] = React.useState<
     "bitcoin" | "testnet" | undefined
@@ -78,6 +81,12 @@ function App() {
     setUtxos(addressTxsUtxos);
     const recommendedFees = await fees.getFeesRecommended();
     setToFeeRate(recommendedFees.fastestFee.toString());
+
+    const sentTransactions = await addresses.getAddressTxs({
+      address: address.address,
+    });
+    setSentTransactions(sentTransactions);
+
     setLoading(false);
   }, []);
 
@@ -217,7 +226,9 @@ function App() {
     if (result.ok) {
       const sentTransactionId = await result.text();
       setSentTransactionId(sentTransactionId);
-      //alert("Transaction broadcasted: " + sentTransactionId);
+
+      // reload utxos and transactions
+      load();
     } else {
       const error = await result.text();
       console.error(result.status, error);
@@ -303,6 +314,31 @@ function App() {
                 {sentTransactionId}
               </a>
             </p>
+          )}
+
+          {sentTransactions && (
+            <div>
+              <p>Transactions</p>
+              {sentTransactions.map((tx) => (
+                <p key={tx.txid}>
+                  <a
+                    className="text-blue-500 underline"
+                    href={`https://mempool.space/testnet/tx/${tx.txid}`}
+                    target="_blank"
+                  >
+                    {tx.txid}
+                  </a>
+                  {tx.vout
+                    .filter(
+                      (vout) => vout.scriptpubkey_address !== address?.address
+                    )
+                    .map((vout) => vout.value)
+                    .reduce((a, b) => a + b, 0)}{" "}
+                  sats {new Date(tx.status.block_time * 1000).toDateString()}{" "}
+                  {tx.status.confirmed ? "CONFIRMED" : "UNCONFIRMED"}
+                </p>
+              ))}
+            </div>
           )}
         </>
       )}
