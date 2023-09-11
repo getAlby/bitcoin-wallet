@@ -16,14 +16,14 @@ export function TransactionsTab({
 }: TransactionsTabProps) {
   return (
     <>
-      <table className="table">
+      <table className="table text-center">
         <tbody>
           {transactions.map((tx) => {
             const isOutgoing =
               tx.vin[0].prevout.scriptpubkey_address === address.address;
             return (
-              <tr key={tx.txid}>
-                <td className="text-xs">
+              <tr key={tx.txid} className="flex">
+                <td className="text-xs flex-1">
                   {tx.status.confirmed
                     ? formatDistance(
                         new Date(tx.status.block_time * 1000),
@@ -34,7 +34,7 @@ export function TransactionsTab({
                       )
                     : "unconfirmed"}{" "}
                 </td>
-                <td>
+                <td className="flex-1">
                   <a
                     className="link break-all"
                     href={getTransactionUrl(tx.txid, networkType)}
@@ -44,7 +44,7 @@ export function TransactionsTab({
                     {tx.txid.substring(tx.txid.length - 8)}
                   </a>
                 </td>
-                <td className="font-bold flex justify-center items-center gap-1">
+                <td className="font-bold flex justify-center items-center gap-1 flex-1">
                   <p
                     className={`${
                       isOutgoing ? "text-red-500" : "text-green-500"
